@@ -10,146 +10,163 @@
     rel="stylesheet"
   />
   <style>
-    html, body, #cesiumContainer {
-      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: sans-serif;
+      display: flex;
+      gap: 20px;
     }
     #controls {
-      position: absolute;
-      top: 10px; left: 10px;
-      background: rgba(255,255,255,0.9);
-      padding: .5em; border-radius: 4px;
-      font-family: sans-serif;
+      max-width: 300px;
     }
-    #controls input, #controls select {
-      margin: 0 .2em .5em 0;
+    #controls input,
+    #controls select {
+      margin: 0 0 0.5em 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #cesiumContainer {
+      width: 500px;
+      height: 500px;
+      border: 1px solid #ccc;
     }
   </style>
 </head>
 <body>
-  <div id="cesiumContainer"></div>
   <div id="controls">
-    <div>
-      <label>Lat : <input type="number" id="lat" value="48.8566" step="0.0001"></label>
-      <label>Lon : <input type="number" id="lon" value="2.3522" step="0.0001"></label>
-    </div>
-    <div>
-      <label>Système :
-        <select id="coordType">
-          <option value="horizontal">Azimutal (Az, Alt)</option>
-          <option value="equatorial">Équatorial (RA, Dec)</option>
-        </select>
-      </label>
-    </div>
+    <h3>Paramètres de pointage</h3>
+    <label>Lat (°):<br><input type="number" id="lat" value="48.8566" step="0.0001"></label>
+    <label>Lon (°):<br><input type="number" id="lon" value="2.3522" step="0.0001"></label>
+    <label>Système:<br>
+      <select id="coordType">
+        <option value="horizontal">Azimutal (Az, Alt)</option>
+        <option value="equatorial">Équatorial (RA, Dec)</option>
+      </select>
+    </label>
     <div id="horizInputs">
-      <label>Az (°) : <input type="number" id="az" value="45" step="0.1"></label>
-      <label>Alt (°) : <input type="number" id="alt" value="30" step="0.1"></label>
+      <label>Az (°):<br><input type="number" id="az" value="45" step="0.1"></label>
+      <label>Alt (°):<br><input type="number" id="alt" value="30" step="0.1"></label>
     </div>
     <div id="eqInputs" style="display:none">
-      <label>RA (h déc.) : <input type="number" id="ra" value="5.0" step="0.01"></label>
-      <label>Dec (°) : <input type="number" id="dec" value="20.0" step="0.1"></label>
-      <label>Date UTC : <input type="datetime-local" id="date"></label>
+      <label>RA (h déc.):<br><input type="number" id="ra" value="5.0" step="0.01"></label>
+      <label>Dec (°):<br><input type="number" id="dec" value="20.0" step="0.1"></label>
+      <label>Date UTC:<br><input type="datetime-local" id="date"></label>
     </div>
-    <button id="draw">Tracer</button>
+    <button id="draw">Tracer Point Unique</button>
+    <button id="drawGlobal">Axes Azimutaux Globaux</button>
   </div>
+  <div id="cesiumContainer"></div>
 
   <script>
-    // Votre token Cesium Ion
     Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3M2EwNmFkZi1iZmM0LTQ2NGItYmI4Ni1kYmNhYTc0ZjRlOGEiLCJpZCI6MzIxNDk0LCJpYXQiOjE3NTI1MzczOTN9.92jF4Cw7YScEADUnsviR0dmZ04rdd_8fzKfJjICyBxk';
 
     const viewer = new Cesium.Viewer('cesiumContainer', {
       terrainProvider: Cesium.createWorldTerrain(),
-      timeline: false, animation: false
+      timeline: false,
+      animation: false,
+      shouldAnimate: false,
+      homeButton: false,
+      sceneModePicker: false
     });
 
-    // Conversion lat/lon → Cartesian3
+    // Vue globale : voir tout le globe
+    viewer.camera.setView({
+      destination: Cesium.Rectangle.fromDegrees(-180, -90, 180, 90)
+    });
+
+    const ARROW_LENGTH = 10_000_000;
+
     function toCartesian(lat, lon, alt = 0) {
       return Cesium.Cartesian3.fromDegrees(lon, lat, alt);
     }
 
-    // Repère local East–North–Up
     function getLocalFrame(lat, lon) {
       const φ = Cesium.Math.toRadians(lat);
       const λ = Cesium.Math.toRadians(lon);
-      // Up
       const up = Cesium.Cartesian3.normalize(
-        Cesium.Cartesian3.fromRadians(λ, φ, 1),
-        new Cesium.Cartesian3()
+        Cesium.Cartesian3.fromRadians(λ, φ, 1), new Cesium.Cartesian3()
       );
-      // East
       const east = new Cesium.Cartesian3(-Math.sin(λ), 0, Math.cos(λ));
       Cesium.Cartesian3.normalize(east, east);
-      // North = Up × East
       const north = Cesium.Cartesian3.cross(up, east, new Cesium.Cartesian3());
       Cesium.Cartesian3.normalize(north, north);
       return { east, north, up };
     }
 
-    // Tracer une flèche
-    function addArrow(origin, dir, color, length = 200000) {
-      const end = Cesium.Cartesian3.add(
+    function addArrow(origin, dir, color, length = ARROW_LENGTH) {
+      // Décaler l'origine légèrement au-dessus de la surface pour éviter le clipping
+      const start = Cesium.Cartesian3.add(
         origin,
+        Cesium.Cartesian3.multiplyByScalar(dir, 100_000, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()
+      );
+      const end = Cesium.Cartesian3.add(
+        start,
         Cesium.Cartesian3.multiplyByScalar(dir, length, new Cesium.Cartesian3()),
         new Cesium.Cartesian3()
       );
       viewer.entities.add({
-        polyline: {
-          positions: [origin, end],
-          width: 3,
-          material: color
-        }
+        polyline: { positions: [start, end], width: 4, material: color }
       });
     }
 
-    // GMST (en heures) approximation
     function gmstHours(date) {
-      const jd = (date.valueOf() / 86400000) + 2440587.5;
+      const jd = date.valueOf() / 86400000 + 2440587.5;
       const d = jd - 2451545.0;
       const gmst = 18.697374558 + 24.06570982441908 * d;
       return (gmst % 24 + 24) % 24;
     }
 
-    // Équatorial → Az/Alt
     function equatorialToHorizontal(raHrs, decDeg, latDeg, lonDeg, date) {
       const ra = raHrs * 15 * Math.PI/180;
       const dec = Cesium.Math.toRadians(decDeg);
-      // Sidereal time en radians
       const lst = (gmstHours(date) + lonDeg/15) * 15 * Math.PI/180;
-      const ha = lst - ra; // hour angle
+      const ha = lst - ra;
       const φ = Cesium.Math.toRadians(latDeg);
-      // Altitude
       const sinAlt = Math.sin(φ)*Math.sin(dec) + Math.cos(φ)*Math.cos(dec)*Math.cos(ha);
       const alt = Math.asin(sinAlt);
-      // Azimuth (degré de N vers E)
-      const y = -Math.sin(ha);
-      const x = Math.tan(dec)*Math.cos(φ) - Math.sin(φ)*Math.cos(ha);
-      let az = Math.atan2(y, x);
+      let az = Math.atan2(
+        -Math.sin(ha),
+        Math.tan(dec)*Math.cos(φ) - Math.sin(φ)*Math.cos(ha)
+      );
       if (az < 0) az += 2*Math.PI;
       return { az: az * 180/Math.PI, alt: alt * 180/Math.PI };
     }
 
-    // Gestion UI
+    // Handlers UI
     document.getElementById('coordType').addEventListener('change', e => {
-      const h = document.getElementById('horizInputs');
-      const q = document.getElementById('eqInputs');
-      if (e.target.value === 'horizontal') {
-        h.style.display = ''; q.style.display = 'none';
-      } else {
-        h.style.display = 'none'; q.style.display = '';
-      }
+      document.getElementById('horizInputs').style.display =
+        e.target.value === 'horizontal' ? '' : 'none';
+      document.getElementById('eqInputs').style.display =
+        e.target.value === 'equatorial' ? '' : 'none';
     });
 
     document.getElementById('draw').addEventListener('click', () => {
       viewer.entities.removeAll();
-      const lat = parseFloat(document.getElementById('lat').value);
-      const lon = parseFloat(document.getElementById('lon').value);
-      const P = toCartesian(lat, lon, 0);
+      drawAt(document.getElementById('lat').value, document.getElementById('lon').value);
+    });
+
+    document.getElementById('drawGlobal').addEventListener('click', () => {
+      viewer.entities.removeAll();
+      // Grille autour du globe
+      const lats = [-60, -30, 0, 30, 60];
+      const lons = [-180, -120, -60, 0, 60, 120, 180];
+      lats.forEach(lat => lons.forEach(lon => drawAt(lat, lon)));
+    });
+
+    function drawAt(latVal, lonVal) {
+      const lat = parseFloat(latVal);
+      const lon = parseFloat(lonVal);
+      const P   = toCartesian(lat, lon, 0);
       const { east, north, up } = getLocalFrame(lat, lon);
 
-      // Tracer axes locaux
+      // Axes locaux
       addArrow(P, north, Cesium.Color.RED);
       addArrow(P, east,  Cesium.Color.GREEN);
       addArrow(P, up,    Cesium.Color.BLUE);
 
+      // Calcul de l’azimut et altitude
       let az, alt;
       if (document.getElementById('coordType').value === 'horizontal') {
         az  = Cesium.Math.toRadians(parseFloat(document.getElementById('az').value));
@@ -157,15 +174,13 @@
       } else {
         const ra  = parseFloat(document.getElementById('ra').value);
         const dec = parseFloat(document.getElementById('dec').value);
-        let date = document.getElementById('date').valueAsDate;
-        if (!date) date = new Date();
+        const date = document.getElementById('date').valueAsDate || new Date();
         const h = equatorialToHorizontal(ra, dec, lat, lon, date);
         az  = Cesium.Math.toRadians(h.az);
         alt = Cesium.Math.toRadians(h.alt);
       }
 
-      // Direction de l’objet dans le repère local
-      // dir = Up*sin(alt) + cos(alt)*(cos(az)*North + sin(az)*East)
+      // Vecteur direction
       const dir = new Cesium.Cartesian3();
       Cesium.Cartesian3.multiplyByScalar(up,   Math.sin(alt), dir);
       const nn = new Cesium.Cartesian3();
@@ -176,12 +191,9 @@
       Cesium.Cartesian3.add(dir, ee, dir);
       Cesium.Cartesian3.normalize(dir, dir);
 
-      // Tracer la flèche d’alignement vers l’objet
-      addArrow(P, dir, Cesium.Color.YELLOW, 400000);
-
-      // Recentrer la caméra
-      viewer.camera.flyTo({ destination: P });
-    });
+      // Flèche cible en jaune
+      addArrow(P, dir, Cesium.Color.YELLOW, ARROW_LENGTH * 1.2);
+    }
   </script>
 </body>
-</html>
+</html> 
