@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <title>Visualisation Azimutal & Équatorial avec CesiumJS</title>
   <!-- CesiumJS CDN -->
-  <script src="https://cesium.com/downloads/cesiumjs/releases/1.106/Build/Cesium/Cesium.js"></script>
-  <link href="https://cesium.com/downloads/cesiumjs/releases/1.106/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.131/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.131/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
   <style>
     body {
       margin: 0;
@@ -74,10 +74,10 @@
       animation: false,
       shouldAnimate: false
     });
-    // désactiver zoom/rotation
-    const controller = viewer.scene.screenSpaceCameraController;
-    controller.enableZoom = false;
-    controller.enableRotate = false;
+
+    // autoriser zoom/rotation
+    viewer.scene.screenSpaceCameraController.enableZoom = true;
+    viewer.scene.screenSpaceCameraController.enableRotate = true;
 
     // vue globale
     viewer.camera.setView({
@@ -85,10 +85,10 @@
     });
 
     const RADIUS = 6371000;
-    const SURFACE_OFFSET = 100000;
-    const ARROW_LENGTH = 10000000;
+    const SURFACE_OFFSET = 200000;    // 200 km au-dessus de la surface
+    const ARROW_LENGTH    = 15000000; // flèches plus longues
 
-    function toCartesian(lat, lon, height = 0) {
+    function toCartesian(lat, lon, height = SURFACE_OFFSET) {
       return Cesium.Cartesian3.fromDegrees(lon, lat, height);
     }
     function getLocalFrame(lat, lon) {
@@ -107,18 +107,12 @@
     }
 
     function addLine(positions, color) {
-      viewer.entities.add({
-        polyline: {
-          positions,
-          width: 2,
-          material: color
-        }
-      });
+      viewer.entities.add({ polyline: { positions, width: 2, material: color } });
     }
 
     // 1. Verticale (sol → zénith)
     function drawZenith(lat, lon) {
-      const P = toCartesian(lat, lon, 0);
+      const P = toCartesian(lat, lon);
       const { up } = getLocalFrame(lat, lon);
       const top = Cesium.Cartesian3.add(
         P,
@@ -128,7 +122,7 @@
       addLine([P, top], Cesium.Color.WHITE);
     }
 
-    // 2. Méridien (grand cercle longitudinal)
+    // 2. Méridien (grand cercle)
     function drawMeridian(lat, lon) {
       const pts = [];
       for (let φ = -90; φ <= 90; φ += 2) {
@@ -137,28 +131,28 @@
       addLine(pts, Cesium.Color.CYAN);
     }
 
-    // 3. Cercle vertical de l'objet (plan contenant up & dir)
+    // 3. Cercle vertical de l'objet
     function drawVerticalCircle(lat, lon, dir) {
       const { up } = getLocalFrame(lat, lon);
       const pts = [];
       for (let θ = 0; θ <= 2*Math.PI; θ += 0.1) {
         const v = new Cesium.Cartesian3();
-        const a = Cesium.Cartesian3.multiplyByScalar(up, Math.cos(θ), new Cesium.Cartesian3());
-        const b = Cesium.Cartesian3.multiplyByScalar(dir, Math.sin(θ), new Cesium.Cartesian3());
+        const a = Cesium.Cartesian3.multiplyByScalar(up,   Math.cos(θ), new Cesium.Cartesian3());
+        const b = Cesium.Cartesian3.multiplyByScalar(dir,  Math.sin(θ), new Cesium.Cartesian3());
         Cesium.Cartesian3.add(a, b, v);
         Cesium.Cartesian3.normalize(v, v);
-        pts.push(Cesium.Cartesian3.multiplyByScalar(v, RADIUS, new Cesium.Cartesian3()));
+        pts.push(Cesium.Cartesian3.multiplyByScalar(v, RADIUS + SURFACE_OFFSET, new Cesium.Cartesian3()));
       }
       addLine(pts, Cesium.Color.ORANGE);
     }
 
     // 4. Trace vers l'objet
     function drawPointing(lat, lon, az, alt) {
-      const P = toCartesian(lat, lon, 0);
+      const P = toCartesian(lat, lon);
       const { up, north, east } = getLocalFrame(lat, lon);
-      const a = Cesium.Cartesian3.multiplyByScalar(up, Math.sin(alt), new Cesium.Cartesian3());
+      const a = Cesium.Cartesian3.multiplyByScalar(up,   Math.sin(alt), new Cesium.Cartesian3());
       const n = Cesium.Cartesian3.multiplyByScalar(north, Math.cos(alt)*Math.cos(az), new Cesium.Cartesian3());
-      const e = Cesium.Cartesian3.multiplyByScalar(east, Math.cos(alt)*Math.sin(az), new Cesium.Cartesian3());
+      const e = Cesium.Cartesian3.multiplyByScalar(east,  Math.cos(alt)*Math.sin(az), new Cesium.Cartesian3());
       const dir = new Cesium.Cartesian3();
       Cesium.Cartesian3.add(a, n, dir);
       Cesium.Cartesian3.add(dir, e, dir);
@@ -181,6 +175,7 @@
       addLine(pts, Cesium.Color.MAGENTA);
     }
 
+    // UI handlers
     document.getElementById('coordType').addEventListener('change', e => {
       document.getElementById('horizInputs').style.display = e.target.value === 'horizontal' ? 'block' : 'none';
       document.getElementById('eqInputs').style.display    = e.target.value === 'equatorial' ? 'block' : 'none';
